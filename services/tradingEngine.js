@@ -45,16 +45,71 @@ function stopUserWebSocket(userId) {
    FIND TOKEN
 ===================================================== */
 
+// async function findTokenAndSubscribe(userId, signal) {
+//   try {
+//     const session = initUserTrade(userId);
+//     session.signalData = signal;
+//     console.log(session.signalData);
+//     const response = await axios.get(
+//       "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
+//     );
+
+//     const data = response.data;
+
+//     const filtered = data
+//       .filter(
+//         (item) =>
+//           item.exch_seg === "NFO" &&
+//           item.name === signal.indexName &&
+//           item.instrumenttype === "OPTIDX",
+//       )
+//       .map((item) => ({
+//         token: item.token,
+//         symbol: item.symbol,
+//         strike: Number(item.strike) / 100,
+//         optionType: item.symbol.endsWith("CE") ? "CE" : "PE",
+//         expiry: new Date(item.expiry),
+//       }))
+//       .filter((item) => item.expiry >= new Date())
+//       .sort((a, b) => a.expiry - b.expiry);
+
+//     const nearestExpiry = filtered[0]?.expiry;
+
+//     session.selectedOption = filtered.find(
+//       (opt) =>
+//         opt.strike === Number(signal.strike) &&
+//         opt.optionType === signal.optionType &&
+//         opt.expiry.getTime() === nearestExpiry.getTime(),
+//     );
+
+//     if (!session.selectedOption) {
+//       console.log("❌ No Matching Option Found");
+//       return;
+//     }
+
+//     console.log("✅ Option Found:", session.selectedOption.symbol);
+
+//     await connectWebSocket(userId, [session.selectedOption.token]);
+//   } catch (err) {
+//     console.log("FIND TOKEN ERROR:", err.message);
+//   }
+// }
+
 async function findTokenAndSubscribe(userId, signal) {
   try {
     const session = initUserTrade(userId);
     session.signalData = signal;
     console.log(session.signalData);
+
     const response = await axios.get(
       "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json",
     );
 
     const data = response.data;
+
+    // ✅ Set today date to 00:00:00 (ignore time)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     const filtered = data
       .filter(
@@ -63,17 +118,28 @@ async function findTokenAndSubscribe(userId, signal) {
           item.name === signal.indexName &&
           item.instrumenttype === "OPTIDX",
       )
-      .map((item) => ({
-        token: item.token,
-        symbol: item.symbol,
-        strike: Number(item.strike) / 100,
-        optionType: item.symbol.endsWith("CE") ? "CE" : "PE",
-        expiry: new Date(item.expiry),
-      }))
-      .filter((item) => item.expiry >= new Date())
+      .map((item) => {
+        const expiryDate = new Date(item.expiry);
+        expiryDate.setHours(0, 0, 0, 0); // remove time
+
+        return {
+          token: item.token,
+          symbol: item.symbol,
+          strike: Number(item.strike) / 100,
+          optionType: item.symbol.endsWith("CE") ? "CE" : "PE",
+          expiry: expiryDate,
+        };
+      })
+      // ✅ Now today's expiry will be included
+      .filter((item) => item.expiry >= today)
       .sort((a, b) => a.expiry - b.expiry);
 
     const nearestExpiry = filtered[0]?.expiry;
+
+    if (!nearestExpiry) {
+      console.log("❌ No Valid Expiry Found");
+      return;
+    }
 
     session.selectedOption = filtered.find(
       (opt) =>
@@ -166,7 +232,7 @@ async function connectWebSocket(userId, tokens) {
           entryPrice: ltp,
           target: session.signalData.target,
           sl: session.signalData.sl,
-          status: "ENTRY",
+          status: "OPEN",
         });
 
         // 🔥 PUSH TO FRONTEND
@@ -243,8 +309,21 @@ async function placeOrder(userId, type) {
 
     const session = initUserTrade(userId);
     const user = await User.findById(userId);
+    let finalQty = null;
 
-    const orderData = {
+    if (session.selectedOption.symbol.includes("BANKNIFTY")) {
+      finalQty = 30;
+    } else if (
+      session.selectedOption.symbol.includes("NIFTY") &&
+      !session.selectedOption.symbol.includes("BANKNIFTY") &&
+      !session.selectedOption.symbol.includes("FINNIFTY")
+    ) {
+      finalQty = 65;
+    } else if (session.selectedOption.symbol.includes("FINNIFTY")) {
+      finalQty = 60;
+    }
+
+    const orderData = JSON.stringify({
       variety: "NORMAL",
       tradingsymbol: session.selectedOption.symbol,
       symboltoken: session.selectedOption.token,
@@ -253,12 +332,12 @@ async function placeOrder(userId, type) {
       ordertype: "MARKET",
       producttype: "INTRADAY",
       duration: "DAY",
-      quantity: 30,
+      quantity: finalQty,
       price: "0",
       squareoff: "0",
       stoploss: "0",
       disclosedquantity: 0,
-    };
+    });
 
     await axios.post(
       "https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder",
@@ -270,7 +349,10 @@ async function placeOrder(userId, type) {
           Accept: "application/json",
           "X-UserType": "USER",
           "X-SourceID": "WEB",
-          "X-PrivateKey": process.env.ANGEL_API_KEY,
+          "X-ClientLocalIP": "CLIENT_LOCAL_IP",
+          "X-ClientPublicIP": "CLIENT_PUBLIC_IP",
+          "X-MACAddress": "MAC_ADDRESS",
+          "X-PrivateKey": user.angel.apiKey,
         },
       },
     );

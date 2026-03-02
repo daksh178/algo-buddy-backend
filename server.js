@@ -10,6 +10,7 @@ const angelRoutes = require("./routes/angelRoutes");
 const telegramRoutes = require("./routes/telegramRoutes");
 const algoRoutes = require("./routes/algoRoutes");
 const tradeRoutes = require("./routes/tradeRoutes");
+const userRoutes = require("./routes/user");
 
 const connectDB = require("./config/db");
 connectDB();
@@ -23,7 +24,7 @@ const User = require("./models/User");
 (async () => {
   const runningUsers = await User.find({ "algo.running": true });
 
-  runningUsers.forEach(user => {
+  runningUsers.forEach((user) => {
     setAlgoRunning(user._id.toString(), true);
   });
 
@@ -68,6 +69,7 @@ app.use("/api/angel", angelRoutes);
 app.use("/api/telegram", telegramRoutes);
 app.use("/api/algo", algoRoutes);
 app.use("/api/trades", tradeRoutes);
+app.use("/api/user", userRoutes);
 
 /* ================= HEALTH CHECK ================= */
 

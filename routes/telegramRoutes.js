@@ -363,7 +363,7 @@ router.delete("/signals", authMiddleware, async (req, res) => {
    (Server timezone based)
 ===================================================== */
 
-cron.schedule("35 14 * * *", async () => {
+cron.schedule("39 15 * * *", async () => {
   try {
     console.log("🕔 Running Daily Signal Cleanup...");
 
